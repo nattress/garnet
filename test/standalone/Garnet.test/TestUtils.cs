@@ -74,14 +74,40 @@ namespace Garnet.test
         UseReviv = 1,
     }
 
+    /// <summary>
+    /// Unique base port for each test sub-project, enabling parallel test runs without port conflicts.
+    /// </summary>
+    public enum TestPortAssignment
+    {
+        GarnetTest = 33278,
+        GarnetTestAlternate = 34278,    // Alternate port for GarnetTest; used by NetworkTests.cs
+        GarnetTestAcl = 34300,
+        GarnetTestCollections = 34400,
+        GarnetTestComplexString = 34500,
+        GarnetTestExtensions = 34600,
+        GarnetTestRangeIndex = 34700,
+        GarnetTestScripting = 34800,
+        GarnetTestVectorSet = 34900,
+    }
+
     internal static class TestUtils
     {
-        public static readonly int TestPort = 33278;
+        public static int TestPort = (int)TestPortAssignment.GarnetTest;    // No OneTimeSetUp needed for "Garnet.test" to set this
 
         /// <summary>
         /// Test server end point
         /// </summary>
         public static EndPoint EndPoint = new IPEndPoint(IPAddress.Loopback, TestPort);
+
+        /// <summary>
+        /// Sets the test port for the current sub-project, updating both <see cref="TestPort"/> and <see cref="EndPoint"/>.
+        /// Call from a <c>[SetUpFixture]</c> in each sub-project.
+        /// </summary>
+        public static void SetTestPort(TestPortAssignment port)
+        {
+            TestPort = (int)port;
+            EndPoint = new IPEndPoint(IPAddress.Loopback, TestPort);
+        }
 
         /// <summary>
         /// Whether to use a test progress logger
@@ -104,7 +130,7 @@ namespace Garnet.test
                 return container;
             }
         }
-        internal static string AzureTestDirectory => TestContext.CurrentContext.Test.MethodName;
+        internal static string AzureTestDirectory => $"{Environment.ProcessId}_{TestContext.CurrentContext.Test.MethodName}";
         internal const string AzureEmulatedStorageString = "UseDevelopmentStorage=true;";
         internal static AzureStorageNamedDeviceFactoryCreator AzureStorageNamedDeviceFactoryCreator =
             IsRunningAzureTests ? new AzureStorageNamedDeviceFactoryCreator(AzureEmulatedStorageString, null) : null;
@@ -280,7 +306,8 @@ namespace Garnet.test
             bool enableRangeIndexPreview = false,
             string aofMemorySize = "64m",
             string aofPageSize = null,
-            bool copyReadsToTail = false
+            bool copyReadsToTail = false,
+            int replayTaskCount = 1
             )
         {
             if (useAzureStorage)
@@ -360,6 +387,7 @@ namespace Garnet.test
                 EnableModuleCommand = enableModuleCommand,
                 EnableReadCache = enableReadCache,
                 ReplicationOffsetMaxLag = asyncReplay ? -1 : 0,
+                AofReplayTaskCount = replayTaskCount,
                 LuaOptions = enableLua ? new LuaOptions(luaMemoryMode, luaMemoryLimit, luaTimeout ?? Timeout.InfiniteTimeSpan, luaLoggingMode, luaAllowedFunctions ?? [], logger) : null,
                 UnixSocketPath = unixSocketPath,
                 UnixSocketPermission = unixSocketPermission,
@@ -423,7 +451,7 @@ namespace Garnet.test
                 {
                     if (useTestLogger)
                     {
-                        _ = builder.AddProvider(new NUnitLoggerProvider(TestContext.Progress, TestContext.CurrentContext.Test.MethodName, null, false, false, LogLevel.Trace));
+                        _ = builder.AddProvider(new NUnitLoggerProvider(TestContext.Progress, $"{Environment.ProcessId}_{TestContext.CurrentContext.Test.MethodName}", null, false, false, LogLevel.Trace));
                     }
 
                     if (logTo != null)
@@ -887,7 +915,7 @@ namespace Garnet.test
                 AbortOnConnectFail = true,
                 Password = authPassword,
                 User = authUsername,
-                ClientName = TestContext.CurrentContext.Test.MethodName,
+                ClientName = $"{Environment.ProcessId}_{TestContext.CurrentContext.Test.MethodName}",
                 Protocol = protocol,
             };
 
@@ -1003,8 +1031,8 @@ namespace Garnet.test
         /// <returns></returns>
         internal static string UnitTestWorkingDir()
         {
-            // Include process id to avoid conflicts between parallel test runs
-            var testPath = $"{Environment.ProcessId}_{TestContext.CurrentContext.Test.ClassName}_{TestContext.CurrentContext.Test.MethodName}";
+            // Include process id to avoid conflicts between parallel test runs, and remove the prefix to keep the length short.
+            var testPath = $"{Environment.ProcessId}_{TestContext.CurrentContext.Test.ClassName.Split("Garnet.test")[0]}_{TestContext.CurrentContext.Test.MethodName}";
 
             // Incorporate arguments (as a hash code) so different runs of the same method get different folders
             //
